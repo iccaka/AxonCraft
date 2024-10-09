@@ -16,4 +16,4 @@ in this project.
 ## License
 
 This project is licensed under the MIT License - *see the* 
-[LICENSE]() *file for details.*
+[LICENSE](https://github.com/iccaka/AxonCraft/blob/master/LICENSE.md) *file for details.*

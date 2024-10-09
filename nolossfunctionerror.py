@@ -1,0 +1,2 @@
+class NoLossFunctionError(Exception):
+    pass

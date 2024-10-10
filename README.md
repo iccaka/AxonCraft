@@ -22,6 +22,8 @@
    $> pip3 install -r requirements.txt
    ```
 
+There's a demo inside [main.py](main.py) which showcases how to set up, train, and evaluate a simple neural network.
+
 ## Dependencies
 
 Please refer to [requirements.txt](requirements.txt) for a list of the python module dependencies.

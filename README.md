@@ -7,11 +7,11 @@
 ### Run locally
 
 1. Clone the **AxonCraft** repository in your desired directory:
-    ```
+    ```bash
    $> git clone https://github.com/iccaka/AxonCraft.git
    ```
 2. Run these commands in order:
-    ```
+    ```bash
    # create a new virtual environment
    $> python3 -m venv venv
 
@@ -19,7 +19,7 @@
    $> source /venv/bin/activate
    
    # install project dependencies
-   pip3 install -r requirements.txt
+   $> pip3 install -r requirements.txt
    ```
 
 ## Dependencies

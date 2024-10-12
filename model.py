@@ -16,11 +16,13 @@ class Model:
         self._optimizer = None
         self._loss = None
         self._learning_rate = None
+        self._batch_norm = None
         self._grad = None
         # TODO could probably be made like it is in tf -> dict history -> returned after calling fit()
         self.__layers = np.array(layers)
         self.__cache = None
         self.__are_weights_initialized = False
+        self.__are_BN_parameters_initialized = False
 
         self._update_layer_names()
 
@@ -49,14 +51,14 @@ class Model:
                     weights[i + 1].shape
                 ))
 
-            print('\nTotal params: {}'.format(total_param_count))
+            print('Total params: {}'.format(total_param_count))
         else:
             for layer in self.__layers:
                 print('Name: {} / Units: {} / Activation: {} / Initializer: {}'.format(
                     layer.name,
                     layer.unit_count,
                     layer.activation.__name__,
-                    layer.initializer.__name__
+                    layer._initializer.__name__
                 ))
 
     def get_layer(self, name=None, position=None) -> Layer:
@@ -73,7 +75,7 @@ class Model:
                 raise ValueError('No layer found at position: {}'.format(str(position)))
         else:
             for layer in self.__layers:
-                if layer.name == name:
+                if layer._name == name:
                     return layer
 
             raise ValueError('No layer with such name found: {}'.format(name))
@@ -91,6 +93,20 @@ class Model:
             weights.append(layer_weights[1])
 
         return weights
+
+    def get_BN_parameters(self):
+        if not self.__are_BN_parameters_initialized:
+            raise ValueError('BN parameters are not initialized. To do so run either fit() or build() '
+                             'after using configure() and passing batch_norm=True.')
+
+        params = []
+
+        for layer in self.__layers:
+            layer_BN_params = layer.get_BN_parameters()
+            params.append(layer_BN_params[0])
+            params.append(layer_BN_params[1])
+
+            return params
 
     def set_weights(self, weights):
         if self.__are_weights_initialized:
@@ -132,39 +148,108 @@ class Model:
 
         self.__are_weights_initialized = True
 
+        if self.batch_norm and not self.__are_BN_parameters_initialized:
+            self.__initialize_BN_params()
+
+    # TODO check x and y's shapes
+    # TODO add batch size functionality
+    def fit(self, X, y, epochs):
+        if len(self.__layers) == 0:
+            raise EmptyModelError('The model cannot be fit because no layers have been added.')
+
+        if self._loss is None:
+            raise NoLossFunctionError('The model cannot be fit because there\'s no loss function chosen. '
+                                      'To choose one, use configure().')
+
+        if not self.__are_weights_initialized:
+            self.build(_input_shape=X.shape)
+        else:
+            expected = self.__layers[0].get_weights()[0].shape[1]
+
+            if X.shape[1] != expected:
+                raise ValueError('Training data\'s shape doesn\'t match that of the 1st layer\'s weights\' shape.\n'
+                                 'Expected: (x, {})\n'
+                                 'Provided: {}, where \'x\' = training examples.'.format(
+                    expected,
+                    X.shape
+                ))
+
+        if self.batch_norm and not self.__are_BN_parameters_initialized:
+            self.__initialize_BN_params()
+
+        cost_cache = []
+
+        for _ in trange(epochs, desc='Training...', file=sys.stdout):
+            self.__cache = []
+
+            predictions = self._forward_prop(X)
+            cost_cache.append(self._loss(predictions, y))
+            # dA = self._grad(X, predictions, y)
+            dA = predictions - y.reshape(-1, 1)
+            self._update_weights(dA, X)
+
+        print('Training complete!')
+
+        return cost_cache
+
     # TODO finish configure(equal to tf's compile)
-    def configure(self, loss, learning_rate: float = 0.01, optimizer='rmsprop'):
+    def configure(self,
+                  loss,
+                  optimizer: str = 'rmsprop',
+                  learning_rate: float = 0.01,
+                  batch_norm: bool = False
+                  ):
         if loss is None:
             raise ValueError('The loss cannot be empty.')
-
-        self._learning_rate = learning_rate
-
-        # TODO completely change this
-        # TODO maybe make it like it is in tf -> optimizers.get ...
-        if optimizer == 'rmsprop':
-            self._optimizer = optimizer
-        elif optimizer == 'gd':
-            self._optimizer = optimizer
-        elif optimizer == 'adam':
-            self._optimizer = optimizer
-        elif optimizer == 'sgd':
-            self._optimizer = optimizer
 
         # TODO maybe move these methods somewhere else
         if loss == 'categorical_crossentropy':
             self._loss = self.categorical_crossentropy
+            self._grad = self._categorical_crossentropy_gradient
         elif loss == 'sparse_categorical_crossentropy':
             self._loss = self.sparse_categorical_crossentropy
             self._grad = self._sparse_categorical_crossentropy_gradient
         elif loss == 'binary_crossentropy':
             self._loss = self.binary_crossentropy
+            self._grad = self._binary_crossentropy_gradient
         elif loss == 'mean_squared_error':
             self._loss = self.mean_squared_error
             self._grad = self._mean_squared_error_gradient
         elif loss == 'mean_absolute_error':
             self._loss = self.mean_absolute_error
+            self._grad = self._mean_absolute_error_gradient
         else:
-            raise ValueError('No such cost function.')
+            raise ValueError('No such loss function.')
+
+        # TODO maybe make it like it is in tf -> optimizers.get ...
+        if optimizer == 'rmsprop':
+            pass
+        elif optimizer == 'gd':
+            pass
+        elif optimizer == 'adam':
+            pass
+        elif optimizer == 'sgd':
+            pass
+
+        self._learning_rate = learning_rate
+        self._batch_norm = batch_norm
+
+    # TODO finish evaluate
+    def evaluate(self):
+        pass
+
+    # TODO finish predict
+    def predict(self):
+        pass
+
+    def __initialize_BN_params(self):
+        for i, layer in enumerate(self.__layers):
+            layer.set_BN_parameters(
+                np.full(shape=(layer.unit_count, 1), fill_value=1, dtype=float),
+                np.zeros(shape=(layer.unit_count, 1))
+            )
+
+        self.__are_BN_parameters_initialized = True
 
     # TODO vectorized
     @staticmethod
@@ -193,50 +278,8 @@ class Model:
     def mean_absolute_error():
         pass
 
-    # TODO check x and y's shapes
-    # TODO add batch size functionality
-    def fit(self, X, y, epochs):
-        if len(self.__layers) == 0:
-            raise EmptyModelError('The model cannot be fit because no layers have been added.')
-
-        if self._loss is None:
-            raise NoLossFunctionError('The model cannot be fit because there\'s no loss function chosen. '
-                                      'To choose one, use configure().')
-
-        if not self.__are_weights_initialized:
-            self.build(_input_shape=X.shape)
-        else:
-            expected = self.__layers[0].get_weights()[0].shape[1]
-
-            if X.shape[1] != expected:
-                raise ValueError('Training data\'s shape doesn\'t match that of the 1st layer\'s weights\' shape.\n'
-                                 'Expected: (x, {})\n'
-                                 'Provided: {}, where \'x\' = training examples.'.format(
-                    expected,
-                    X.shape
-                ))
-
-        cost_cache = []
-
-        for _ in trange(epochs, desc='Training...', file=sys.stdout):
-            self.__cache = []
-
-            predictions = self._forward_prop(X)
-            cost_cache.append(self._loss(predictions, y))
-            # dA = self._grad(X, predictions, y)
-            dA = predictions - y.reshape(-1, 1)
-            self._update_weights(dA, X)
-
-        print('Training complete!')
-
-        return cost_cache
-
-    # TODO finish evaluate
-    def evaluate(self):
-        pass
-
-    # TODO finish predict
-    def predict(self):
+    @staticmethod
+    def _categorical_crossentropy_gradient():
         pass
 
     @staticmethod
@@ -253,8 +296,16 @@ class Model:
         return result
 
     @staticmethod
+    def _binary_crossentropy_gradient():
+        pass
+
+    @staticmethod
     def _mean_squared_error_gradient(X, predictions, y_true):
         return (1 / y_true.shape[0]) * np.sum(np.matmul((y_true - predictions), X))
+
+    @staticmethod
+    def _mean_absolute_error_gradient():
+        pass
 
     def _update_layer_names(self):
         for i, layer in enumerate(self.__layers):
@@ -298,3 +349,11 @@ class Model:
     @property
     def loss(self):
         return self._loss
+
+    @property
+    def learning_rate(self):
+        return self._learning_rate
+
+    @property
+    def batch_norm(self):
+        return self._batch_norm

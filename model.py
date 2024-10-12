@@ -1,17 +1,17 @@
 import sys
 import numpy as np
 
-from typing import Sequence
 from tqdm import trange
 from emptymodelerror import EmptyModelError
 from layer import Layer
 from nolossfunctionerror import NoLossFunctionError
+from constants import Constants
 
 class Model:
     # TODO add add/remove/replace layer functionality(e.g. when an empty array is passed at first)
     # TODO add learning rate decay
     # TODO validation for optimizer and cost
-    def __init__(self, layers: Sequence[Layer] = []):
+    def __init__(self, layers: list[Layer] = []):
         # TODO __cache shouldn't be a field (maybe idk)
         self._optimizer = None
         self._loss = None
@@ -81,7 +81,7 @@ class Model:
             raise ValueError('No layer with such name found: {}'.format(name))
 
     # TODO maybe do it with @property?
-    def get_weights(self):
+    def get_weights(self) -> list:
         if not self.__are_weights_initialized:
             raise ValueError('Weights are not initialized. To do so run either fit() or build().')
 
@@ -94,7 +94,7 @@ class Model:
 
         return weights
 
-    def get_BN_parameters(self):
+    def get_BN_parameters(self) -> list:
         if not self.__are_BN_parameters_initialized:
             raise ValueError('BN parameters are not initialized. To do so run either fit() or build() '
                              'after using configure() and passing batch_norm=True.')
@@ -106,8 +106,9 @@ class Model:
             params.append(layer_BN_params[0])
             params.append(layer_BN_params[1])
 
-            return params
+        return params
 
+    # TODO check the dtype of weights
     def set_weights(self, weights):
         if self.__are_weights_initialized:
             current_weights = self.get_weights()
@@ -153,7 +154,13 @@ class Model:
 
     # TODO check x and y's shapes
     # TODO add batch size functionality
-    def fit(self, X, y, epochs):
+    def fit(self, X: np.ndarray, y: np.ndarray, epochs: int) -> list:
+        if not isinstance(X, np.ndarray):
+            raise TypeError('X must be of type numpy array. Instead got {}.'.format(type(X)))
+
+        if not isinstance(y, np.ndarray):
+            raise TypeError('y must be of type numpy array. Instead got {}.'.format(type(y)))
+
         if len(self.__layers) == 0:
             raise EmptyModelError('The model cannot be fit because no layers have been added.')
 
@@ -242,6 +249,40 @@ class Model:
     def predict(self):
         pass
 
+    def _forward_prop(self, input: np.ndarray):
+        A = input
+
+        for layer in self.__layers:
+            layer_W, layer_b = layer.get_weights()
+            Z = Layer.linear_transform(layer_W, layer_b, A)
+
+            if self.batch_norm:
+                Z = self._BN_transform(Z)
+
+            A = layer.activation(Z)
+            self.__cache.append([A, Z, layer_W, layer_b])
+
+        return A
+
+    def _update_weights(self, dA, X):
+        m = X.shape[0]
+        A = dA
+
+        for i, cache in reversed(list(enumerate(self.__cache))):
+            curr_layer = self.get_layer(position=i)
+
+            dZ = A * curr_layer.activation_grad(cache[1])
+            dW = (1 / m) * np.dot(dZ.T, self.__cache[i - 1][0] if (i - 1) != -1 else X)
+            db = (1 / m) * np.sum(dZ, axis=0, keepdims=True)
+            dA = np.dot(dZ, cache[2])
+
+            curr_layer.set_weights(
+                cache[2] - (self._learning_rate * dW),
+                cache[3] - (self._learning_rate * db.T)
+            )
+
+            A = dA
+
     def __initialize_BN_params(self):
         for i, layer in enumerate(self.__layers):
             layer.set_BN_parameters(
@@ -250,6 +291,21 @@ class Model:
             )
 
         self.__are_BN_parameters_initialized = True
+
+    # TODO should the summation be on axis=0?
+    def _BN_transform(self, Z: np.ndarray) -> np.ndarray:
+        mu = (1 / Z.shape[0]) * np.sum(Z, axis=0)
+        sigma_squared = (1 / Z.shape[0]) * np.sum((Z - mu) ** 2)
+        Z_norm = (Z - mu) / np.sqrt(sigma_squared + Constants.BN_EPSILON.value)
+        BN_params = self.get_BN_parameters()
+
+        # TODO multiply by gamma and add beta
+        return
+
+    def _update_layer_names(self):
+        for i, layer in enumerate(self.__layers):
+            if layer.name == '_':
+                layer.name = 'layer_{}'.format(str(i + 1))
 
     # TODO vectorized
     @staticmethod
@@ -306,41 +362,6 @@ class Model:
     @staticmethod
     def _mean_absolute_error_gradient():
         pass
-
-    def _update_layer_names(self):
-        for i, layer in enumerate(self.__layers):
-            if layer.name == '_':
-                layer.name = 'layer_{}'.format(str(i + 1))
-
-    def _forward_prop(self, input):
-        A = input
-
-        for layer in self.__layers:
-            layer_W, layer_b = layer.get_weights()
-            Z = Layer.linear_transform(layer_W, layer_b, A)
-            A = layer.activation(Z)
-            self.__cache.append([A, Z, layer_W, layer_b])
-
-        return A
-
-    def _update_weights(self, dA, X):
-        m = X.shape[0]
-        A = dA
-
-        for i, cache in reversed(list(enumerate(self.__cache))):
-            curr_layer = self.get_layer(position=i)
-
-            dZ = A * curr_layer.activation_grad(cache[1])
-            dW = (1 / m) * np.dot(dZ.T, self.__cache[i - 1][0] if (i - 1) != -1 else X)
-            db = (1 / m) * np.sum(dZ, axis=0, keepdims=True)
-            dA = np.dot(dZ, cache[2])
-
-            curr_layer.set_weights(
-                cache[2] - (self._learning_rate * dW),
-                cache[3] - (self._learning_rate * db.T)
-            )
-
-            A = dA
 
     @property
     def optimizer(self):

@@ -1,6 +1,5 @@
 import numpy as np
 
-from typing import List
 from initializer import Initializer
 
 class Layer:
@@ -11,9 +10,10 @@ class Layer:
                  name='_',
                  initializer: Initializer = Initializer.random):
         self.__are_weights_initialized = False
+        self.__are_BN_parameters_initialized = False
 
-        self.unit_count = unit_count
-        self.input_shape = input_shape
+        self._unit_count = unit_count
+        self._input_shape = input_shape
 
         # TODO keep in mind there's a difference between self and Layer. ... here
         # TODO use dict? (activations.get?)
@@ -38,12 +38,80 @@ class Layer:
         else:
             raise ValueError('No such activation function.')
 
-        self.name = name
-        self.initializer = initializer
-        self.param_count = 0
+        self._name = name
+        self._initializer = initializer
+        self._param_count = 0
 
         self.__W = None
         self.__b = None
+        # Batch normalization parameters
+        self.__BN_gamma = None
+        self.__BN_beta = None
+
+    # TODO maybe do it with @property?
+    def get_weights(self) -> tuple[np.ndarray, np.ndarray] | list:
+        if not self.__are_weights_initialized:
+            print('The weights are not yet initialized. '
+                  'Please run either fit() or build() on your model before calling.')
+
+            return []
+
+        return self.__W, self.__b
+
+    def get_BN_parameters(self) -> tuple[np.ndarray, np.ndarray] | list:
+        if not self.__are_BN_parameters_initialized:
+            print('The BN parameters are not yet initialized. '
+                  'Please use configure() and fit()/build() on your model before calling.')
+
+            return []
+
+        return self.__BN_gamma, self.__BN_beta
+
+    def set_weights(self, W: np.ndarray, b: np.ndarray):
+        # TODO check whether this is the 1st layer and if everything matches
+        if not isinstance(W, np.ndarray):
+            raise TypeError('W must be of type numpy array. Instead got {}.'.format(type(W)))
+
+        if not isinstance(b, np.ndarray):
+            raise TypeError('b must be of type numpy array. Instead got {}.'.format(type(b)))
+
+        if self.__are_weights_initialized:
+            if self.__W.shape != W.shape or self.__b.shape != b.shape:
+                raise ValueError('The provided weights\' shapes don\'t match with the existing ones.\n'
+                                 'Expected: w: {} / b: {}\n'
+                                 'Provided: w: {} / b: {}'.format(
+                    self.__W.shape,
+                    self.__b.shape,
+                    W.shape,
+                    b.shape
+                )
+                )
+
+        self.__W, self.__b = W, b
+        self.__are_weights_initialized = True
+        self.param_count = (W.shape[1] * self._unit_count) + b.shape[0]
+
+    def set_BN_parameters(self, gamma:np.ndarray, beta: np.ndarray):
+        if not isinstance(gamma, np.ndarray):
+            raise TypeError('Gamma must be of type numpy array. Instead got {}.'.format(type(gamma)))
+
+        if not isinstance(beta, np.ndarray):
+            raise TypeError('Beta must be of type numpy array. Instead got {}.'.format(type(beta)))
+
+        if self.__are_BN_parameters_initialized:
+            if self.__BN_gamma != gamma.shape or self.__BN_beta != beta.shape:
+                raise ValueError('The provided BN parameters\' shapes don\'t match with the existing ones.\n'
+                                 'Expected: gamma: {} / beta: {}\n'
+                                 'Provided: gamma: {} / beta: {}'.format(
+                    self.__BN_gamma.shape,
+                    self.__BN_beta.shape,
+                    gamma.shape,
+                    beta.shape
+                )
+                )
+
+        self.__BN_gamma, self.__BN_beta = gamma, beta
+        self.__are_BN_parameters_initialized = True
 
     # TODO move function definitions to a separate class/file?
     # TODO derivative calculation in a separate class/file?
@@ -109,10 +177,10 @@ class Layer:
     def tanh_gradient(Z: np.ndarray) -> np.ndarray:
         return 1 - (Layer.tanh(Z) ** 2)
 
+    # TODO finish softmax_gradient
     @staticmethod
     def softmax_gradient(Z) -> np.ndarray:
         pass
-
 
     @staticmethod
     def relu_gradient(Z: np.ndarray) -> np.ndarray:
@@ -129,39 +197,23 @@ class Layer:
 
         return np.where(Z <= 0, a, 1)
 
-    # TODO maybe do it with @property?
-    def get_weights(self) -> tuple[np.ndarray, np.ndarray] | List:
-        if not self.__are_weights_initialized:
-            print('The weights are not yet initialized. '
-                  'Please run either fit() or build() on your model before calling.')
-            return []
+    @property
+    def unit_count(self) -> int:
+        return self._unit_count
 
-        return self.__W, self.__b
-
-    def set_weights(self, W: np.ndarray, b: np.ndarray):
-        # TODO check whether this is the 1st layer and if everything matches
-        if not isinstance(W, np.ndarray):
-            raise TypeError('W must be of type numpy array. Instead got {}.'.format(type(W)))
-
-        if not isinstance(b, np.ndarray):
-            raise TypeError('b must be of type numpy array. Instead got {}.'.format(type(b)))
-
+    @unit_count.setter
+    def unit_count(self, new_value: int):
         if self.__are_weights_initialized:
-            if self.__W.shape != W.shape or self.__b.shape != b.shape:
-                raise ValueError('The provided weights\' shapes don\'t match with the existing ones.\n'
-                                 'Expected: w: {} / b: {}\n'
-                                 'Provided: w: {} / b: {}'.format(
-                    self.__W.shape,
-                    self.__b.shape,
-                    W.shape,
-                    b.shape
-                )
-                )
-        else:
-            self.__are_weights_initialized = True
+            raise ValueError('You cannot change the layers\' number of units '
+                             'after the weights have already been initialized.')
 
-        self.__W, self.__b = W, b
-        self.param_count = (W.shape[1] * self._unit_count) + b.shape[0]
+        if not isinstance(new_value, int):
+            raise TypeError('Input must be an int. Instead got {}.'.format(type(new_value)))
+
+        if new_value <= 0:
+            raise ValueError('The unit count must be a positive integer.')
+
+        self._unit_count = new_value
 
     @property
     def input_shape(self) -> tuple:
@@ -177,20 +229,6 @@ class Layer:
             raise TypeError('Input must be equal to None or be a tuple. Instead got {}.'.format(type(new_value)))
 
         self._input_shape = new_value
-
-    @property
-    def unit_count(self) -> int:
-        return self._unit_count
-
-    @unit_count.setter
-    def unit_count(self, new_value: int):
-        if not isinstance(new_value, int):
-            raise TypeError('Input must be an int. Instead got {}.'.format(type(new_value)))
-
-        if new_value <= 0:
-            raise ValueError('The unit count must be a positive integer.')
-
-        self._unit_count = new_value
 
     @property
     def name(self) -> str:

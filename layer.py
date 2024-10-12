@@ -91,7 +91,7 @@ class Layer:
         self.__are_weights_initialized = True
         self.param_count = (W.shape[1] * self._unit_count) + b.shape[0]
 
-    def set_BN_parameters(self, gamma:np.ndarray, beta: np.ndarray):
+    def set_BN_parameters(self, gamma: np.ndarray, beta: np.ndarray):
         if not isinstance(gamma, np.ndarray):
             raise TypeError('Gamma must be of type numpy array. Instead got {}.'.format(type(gamma)))
 

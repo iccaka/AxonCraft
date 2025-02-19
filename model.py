@@ -21,6 +21,7 @@ class Model:
         # TODO could probably be made like it is in tf -> dict history -> returned after calling fit()
         self.__layers = np.array(layers)
         self.__cache = None
+        self.__BN_cache = None
         self.__are_weights_initialized = False
         self.__are_BN_parameters_initialized = False
 
@@ -184,10 +185,13 @@ class Model:
         if self.batch_norm and not self.__are_BN_parameters_initialized:
             self.__initialize_BN_params()
 
+        # TODO make it a dict and append other things to it also
         cost_cache = []
 
         for _ in trange(epochs, desc='Training...', file=sys.stdout):
             self.__cache = []
+            # TODO should __BN_cache be initialized here?
+            self.__BN_cache = []
 
             predictions = self._forward_prop(X)
             cost_cache.append(self._loss(predictions, y))
@@ -199,7 +203,7 @@ class Model:
 
         return cost_cache
 
-    # TODO finish configure(equal to tf's compile)
+    # TODO finish configure
     def configure(self,
                   loss,
                   optimizer: str = 'rmsprop',
@@ -257,7 +261,8 @@ class Model:
             Z = Layer.linear_transform(layer_W, layer_b, A)
 
             if self.batch_norm:
-                Z = self._BN_transform(Z)
+                # TODO Omit b's when using mini-batches
+                Z = self._BN_transform(Z, layer.get_BN_parameters())
 
             A = layer.activation(Z)
             self.__cache.append([A, Z, layer_W, layer_b])
@@ -276,6 +281,10 @@ class Model:
             db = (1 / m) * np.sum(dZ, axis=0, keepdims=True)
             dA = np.dot(dZ, cache[2])
 
+            if self.batch_norm:
+                pass
+                # BN_cache = self.__BN_cache[i]
+
             curr_layer.set_weights(
                 cache[2] - (self._learning_rate * dW),
                 cache[3] - (self._learning_rate * db.T)
@@ -293,14 +302,28 @@ class Model:
         self.__are_BN_parameters_initialized = True
 
     # TODO should the summation be on axis=0?
-    def _BN_transform(self, Z: np.ndarray) -> np.ndarray:
-        mu = (1 / Z.shape[0]) * np.sum(Z, axis=0)
-        sigma_squared = (1 / Z.shape[0]) * np.sum((Z - mu) ** 2)
-        Z_norm = (Z - mu) / np.sqrt(sigma_squared + Constants.BN_EPSILON.value)
-        BN_params = self.get_BN_parameters()
+    def _BN_transform(self, Z: np.ndarray, layer_BN_parameters) -> np.ndarray:
+        m = Z.shape[0]
+        mean = (1 / m) * np.sum(Z, axis=0)
+        variance = (1 / m) * np.sum((Z - mean) ** 2, axis=0)
+        Z_norm = (Z - mean) / np.sqrt(variance + Constants.BN_EPSILON.value)
 
-        # TODO multiply by gamma and add beta
-        return
+        # return np.dot(Z_norm, layer_BN_parameters[0]) + layer_BN_parameters[1].T
+        return Z_norm
+
+        # m = Z.shape[0]
+        # mu = (1 / m) * np.sum(Z, axis=0)
+        # zmu = Z - mu
+        # sq = zmu ** 2
+        # var = (1 / m) * np.sum(sq, axis=0)
+        # sqrtvar = np.sqrt(var + Constants.BN_EPSILON.value)
+        # ivar = 1 / sqrtvar
+        # zhat = zmu * ivar
+        # gammaz = np.dot(zhat, layer_BN_parameters[0])
+        # out = gammaz + layer_BN_parameters[1].T
+        #
+        # self.__BN_cache.append([zhat, layer_BN_parameters[1], zmu, ivar, sqrtvar, var])
+        # return out
 
     def _update_layer_names(self):
         for i, layer in enumerate(self.__layers):
